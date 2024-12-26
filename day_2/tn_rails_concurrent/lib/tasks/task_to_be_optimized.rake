@@ -1,6 +1,7 @@
 require 'net/http'
 require 'uri'
 require 'json'
+require 'parallel'
 
 namespace :orders do
   desc "Process orders with an HTTP request"
@@ -9,32 +10,28 @@ namespace :orders do
 
     Order.destroy_all
     # Оптимизировать тут
-    Array.new(200) { Order.create!(product_id: rand(1..100), quantity: rand(1..10), current_status: :pending) }
+    Order.create!(Array.new(200) { { product_id: rand(1..100), quantity: rand(1..10), current_status: :pending } })
 
     time = Benchmark.realtime do
-      puts Order.pending.count
+      puts Order.pending.size
       # Оптимизировать тут
-      Order.pending.find_in_batches(batch_size: 50) do |batch|
-        process_batch_with_http(batch)
-      end
+      Parallel.each(Order.pending, in_batches: 20) { |order| process_batch_with_http(order) }
     end
 
     puts "Processed orders in #{time.round(2)} seconds with HTTP request"
   end
 
-  def process_batch_with_http(batch)
-    batch.each do |order|
-      # Оптимизировать тут
-      response = send_to_external_service
-      if response.code.to_i == 200
-        order.process!
-        puts "Successfully processed Order ##{order.id}"
-      else
-        raise "Failed to process Order ##{order.id}: #{response.body}"
-      end
-    rescue StandardError => e
-      Rails.logger.error("Error processing Order ##{order.id}: #{e.message}")
+  def process_batch_with_http(order)
+    # Оптимизировать тут
+    response = send_to_external_service
+    if response.code.to_i == 200
+      order.process!
+      puts "Successfully processed Order ##{order.id}"
+    else
+      raise "Failed to process Order ##{order.id}: #{response.body}"
     end
+  rescue StandardError => e
+    Rails.logger.error("Error processing Order ##{order.id}: #{e.message}")
   end
 
   def send_to_external_service
